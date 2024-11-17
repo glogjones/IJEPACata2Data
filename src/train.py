@@ -1,3 +1,5 @@
+# train.py
+
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -41,7 +43,9 @@ from src.utils.logging import (
     grad_logger,
     AverageMeter)
 from src.utils.tensors import repeat_interleave_batch
-from src.datasets.imagenet1k import make_imagenet1k
+
+# Import the new data loader
+from src.datasets.make_fits_cutout_dataset import make_fits_cutout_dataset
 
 from src.helper import (
     load_checkpoint,
@@ -75,7 +79,6 @@ def main(args, resume_preempt=False):
     model_name = args['meta']['model_name']
     load_model = args['meta']['load_checkpoint'] or resume_preempt
     r_file = args['meta']['read_checkpoint']
-    copy_data = args['meta']['copy_data']
     pred_depth = args['meta']['pred_depth']
     pred_emb_dim = args['meta']['pred_emb_dim']
     if not torch.cuda.is_available():
@@ -93,10 +96,10 @@ def main(args, resume_preempt=False):
     batch_size = args['data']['batch_size']
     pin_mem = args['data']['pin_mem']
     num_workers = args['data']['num_workers']
-    root_path = args['data']['root_path']
-    image_folder = args['data']['image_folder']
-    crop_size = args['data']['crop_size']
-    crop_scale = args['data']['crop_scale']
+    cutout_size = args['data']['cutout_size']  # Updated from 'crop_size'
+    # Added paths for FITS file and catalogue
+    image_path = args['data']['image_path']
+    catalogue_path = args['data']['catalogue_path']
     # --
 
     # -- MASK
@@ -162,7 +165,7 @@ def main(args, resume_preempt=False):
     encoder, predictor = init_model(
         device=device,
         patch_size=patch_size,
-        crop_size=crop_size,
+        crop_size=cutout_size,  # Updated to 'cutout_size'
         pred_depth=pred_depth,
         pred_emb_dim=pred_emb_dim,
         model_name=model_name)
@@ -170,7 +173,7 @@ def main(args, resume_preempt=False):
 
     # -- make data transforms
     mask_collator = MBMaskCollator(
-        input_size=crop_size,
+        input_size=cutout_size,  # Updated to 'cutout_size'
         patch_size=patch_size,
         pred_mask_scale=pred_mask_scale,
         enc_mask_scale=enc_mask_scale,
@@ -181,27 +184,28 @@ def main(args, resume_preempt=False):
         min_keep=min_keep)
 
     transform = make_transforms(
-        crop_size=crop_size,
-        crop_scale=crop_scale,
+        crop_size=cutout_size,  # Updated to 'cutout_size'
+        crop_scale=None,  # Set to None as cropping is not needed for cutouts
         gaussian_blur=use_gaussian_blur,
         horizontal_flip=use_horizontal_flip,
         color_distortion=use_color_distortion,
         color_jitter=color_jitter)
 
     # -- init data-loaders/samplers
-    _, unsupervised_loader, unsupervised_sampler = make_imagenet1k(
-            transform=transform,
-            batch_size=batch_size,
-            collator=mask_collator,
-            pin_mem=pin_mem,
-            training=True,
-            num_workers=num_workers,
-            world_size=world_size,
-            rank=rank,
-            root_path=root_path,
-            image_folder=image_folder,
-            copy_data=copy_data,
-            drop_last=True)
+    _, unsupervised_loader, unsupervised_sampler = make_fits_cutout_dataset(
+        transform=transform,
+        batch_size=batch_size,
+        collator=mask_collator,
+        pin_mem=pin_mem,
+        num_workers=num_workers,
+        world_size=world_size,
+        rank=rank,
+        cutout_size=cutout_size,
+        shuffle=True,
+        drop_last=True,
+        catalogue_path=catalogue_path,  # Passed the catalogue path
+        image_path=image_path  # Passed the FITS image path
+    )
     ipe = len(unsupervised_loader)
 
     # -- init optimizer and scheduler
@@ -279,7 +283,7 @@ def main(args, resume_preempt=False):
 
             def load_imgs():
                 # -- unsupervised imgs
-                imgs = udata[0].to(device, non_blocking=True)
+                imgs = udata.to(device, non_blocking=True)  # Adjusted for single tensor
                 masks_1 = [u.to(device, non_blocking=True) for u in masks_enc]
                 masks_2 = [u.to(device, non_blocking=True) for u in masks_pred]
                 return (imgs, masks_1, masks_2)
@@ -376,4 +380,64 @@ def main(args, resume_preempt=False):
 
 
 if __name__ == "__main__":
-    main()
+    # Load configuration file or set default args
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Train I-JEPA with FITS cutouts')
+    parser.add_argument('--config', type=str, help='Path to the YAML configuration file')
+    args = parser.parse_args()
+
+    if args.config:
+        with open(args.config, 'r') as f:
+            config_args = yaml.safe_load(f)
+    else:
+        config_args = {
+            'meta': {
+                'use_bfloat16': False,
+                'model_name': 'vit_base_patch16_224',
+                'load_checkpoint': False,
+                'read_checkpoint': None,
+                'pred_depth': 4,
+                'pred_emb_dim': 256,
+            },
+            'data': {
+                'use_gaussian_blur': True,
+                'use_horizontal_flip': True,
+                'use_color_distortion': True,
+                'color_jitter_strength': 0.4,
+                'batch_size': 32,
+                'pin_mem': True,
+                'num_workers': 8,
+                'cutout_size': 224,
+                'image_path': '/content/drive/MyDrive/im_18k4as.deeper.DI.int.restored.fits',
+                'catalogue_path': '/content/drive/MyDrive/ijepa_logs/catalogue.txt',
+            },
+            'mask': {
+                'allow_overlap': True,
+                'patch_size': 16,
+                'num_enc_masks': 1,
+                'min_keep': 0.5,
+                'enc_mask_scale': (0.2, 0.4),
+                'num_pred_masks': 1,
+                'pred_mask_scale': (0.05, 0.2),
+                'aspect_ratio': (0.75, 1.33),
+            },
+            'optimization': {
+                'ema': (0.99, 1.0),
+                'ipe_scale': 1.0,
+                'weight_decay': 0.1,
+                'final_weight_decay': 0.1,
+                'epochs': 100,
+                'warmup': 10,
+                'start_lr': 1e-6,
+                'lr': 1e-3,
+                'final_lr': 1e-6,
+            },
+            'logging': {
+                'folder': './logs',
+                'write_tag': 'fits_cutout_training',
+            },
+        }
+
+    main(config_args)
+
