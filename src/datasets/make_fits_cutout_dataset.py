@@ -17,10 +17,6 @@ from cata2data import CataData
 _GLOBAL_SEED = 0
 logger = getLogger()
 
-# Paths to the FITS file and catalogue
-image_path = '/content/drive/MyDrive/im_18k4as.deeper.DI.int.restored.fits'  # Update this path as needed
-catalogue_path = '/content/drive/MyDrive/ijepa_logs/catalogue.txt'  # Update this path as needed
-
 # Function to create a dataset and DataLoader for `.fits` file cutouts
 def make_fits_cutout_dataset(
     transform,
@@ -32,7 +28,9 @@ def make_fits_cutout_dataset(
     rank=0,
     cutout_size=224,
     shuffle=True,
-    drop_last=True
+    drop_last=True,
+    image_path=None,
+    catalogue_path=None
 ):
     """
     Creates a DataLoader for `.fits` file cutouts using CataData.
@@ -48,6 +46,8 @@ def make_fits_cutout_dataset(
         cutout_size (int): Size of each cutout.
         shuffle (bool): Whether to shuffle the dataset.
         drop_last (bool): Whether to drop the last incomplete batch.
+        image_path (str): Path to the FITS image file.
+        catalogue_path (str): Path to the catalogue file.
 
     Returns:
         tuple: Dataset, DataLoader, and DistributedSampler.
@@ -138,3 +138,4 @@ def create_transform():
         transforms.Normalize(mean=[0.485], std=[0.229])  # Adjust mean and std as needed
     ])
     return transform
+
