@@ -175,7 +175,7 @@ def main(args, resume_preempt=False):
 
     transform = make_transforms(
         crop_size=cutout_size,
-        crop_scale=None,
+        crop_scale=tuple(args['data']['crop_scale']),  # Ensure it's a tuple
         gaussian_blur=use_gaussian_blur,
         horizontal_flip=use_horizontal_flip,
         color_distortion=use_color_distortion,
