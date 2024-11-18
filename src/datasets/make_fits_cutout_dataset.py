@@ -95,10 +95,12 @@ class FitsCutoutDataset(Dataset):
             cutout_size (int): Size of each cutout.
             transform (callable, optional): Transformations to apply to the cutouts.
         """
+        # Initialize the CataData object
         self.cata_data = CataData(
             catalogue_paths=[catalogue_path],
             image_paths=[image_path],
             cutout_shape=cutout_size,
+            field_names=['COSMOS'],  # Single field name for compatibility
             catalogue_kwargs={'format': 'commented_header', 'delimiter': ' '}
         )
         self.transform = transform
@@ -117,7 +119,7 @@ class FitsCutoutDataset(Dataset):
         Returns:
             torch.Tensor: The transformed cutout image.
         """
-        cutout, _ = self.cata_data[idx]
+        cutout, metadata = self.cata_data[idx]
         if self.transform:
             cutout = self.transform(cutout)
         return cutout
@@ -138,4 +140,5 @@ def create_transform():
         transforms.Normalize(mean=[0.485], std=[0.229])  # Adjust mean and std as needed
     ])
     return transform
+
 
